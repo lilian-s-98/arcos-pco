@@ -255,7 +255,25 @@ function setupSpreadsheet() {
     linhas.push('', '📋 14 atividades de rotina padrão foram inseridas.');
   }
 
-  SpreadsheetApp.getUi().alert(linhas.join('\n'));
+  mostrarMensagem_(linhas.join('\n'));
+}
+
+/**
+ * Mostra uma mensagem para quem rodou a função.
+ *  - Se foi disparado a partir da PLANILHA (menu, botão desenhado nela) ->
+ *    mostra um popup bonito (SpreadsheetApp.getUi().alert).
+ *  - Se foi disparado de dentro do EDITOR do Apps Script (botão ▶️ Executar) ->
+ *    SpreadsheetApp.getUi() não existe nesse contexto e dá o erro
+ *    "Cannot call getUi() from this context". Por isso, nesse caso,
+ *    escrevemos no Log de Execução em vez de quebrar
+ *    (no editor: menu "Ver" > "Registros de execução", ou atalho Ctrl+Enter).
+ */
+function mostrarMensagem_(texto) {
+  try {
+    SpreadsheetApp.getUi().alert(texto);
+  } catch (erroSemUi) {
+    Logger.log(texto);
+  }
 }
 
 /**
