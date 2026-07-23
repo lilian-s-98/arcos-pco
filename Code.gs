@@ -268,5 +268,8 @@ function onOpen() {
 
 function mostrarStatusSetup_() {
   const status = verificarStatusSetup_();
-  SpreadsheetApp.getUi().alert(status.msg);
+  // mostrarMensagem_() vive no Backend_Setup.gs (é uma função genérica
+  // compartilhada — NÃO duplique essa função aqui, senão o projeto passa
+  // a ter duas versões da mesma função em arquivos diferentes).
+  mostrarMensagem_(status.msg);
 }
