@@ -15,6 +15,10 @@
  *   - Toda vez que um novo Backend_*.gs for adicionado, ele precisa ser
  *     "religado" aqui embaixo, dentro de roteador_Get_ e/ou roteador_Post_.
  *     Isso é o ÚNICO lugar que precisa ser tocado ao ligar um módulo novo.
+ *
+ *  HISTÓRICO DE ATUALIZAÇÕES DESTE ARQUIVO:
+ *   - Etapa 1: doGet/doPost, roteadores vazios, utilitários gerais.
+ *   - Etapa 2: ligados os módulos de Login (Auth), Obras e Engenheiros.
  * ============================================================================
  */
 
@@ -130,17 +134,25 @@ function handleGet(jsonTexto) {
 function roteador_Get_(acao, params) {
   switch (acao) {
 
-    // ── Diagnóstico (já funciona nesta etapa) ──────────────────────────────
+    // ── Diagnóstico (Etapa 1) ───────────────────────────────────────────────
     case 'ping':
       return { success: true, msg: 'PCO online! Planilha: ' + PLANILHA.getName() };
 
     case 'status_setup':
       return verificarStatusSetup_();
 
+    case 'config':
+      return getConfig();
+
+    // ── Obras / Engenheiros (Etapa 2 — Backend_Obras.gs / Backend_Engenheiros.gs)
+    case 'obras':
+      return getObras();
+
+    case 'engenheiros':
+      return getEngenheiros();
+
     // ── Módulos a serem ligados nas próximas etapas ────────────────────────
     // case 'dashboard':          return getDashboard();
-    // case 'obras':              return getObras();
-    // case 'engenheiros':        return getEngenheiros();
     // case 'atas':               return getAtas(params);
     // case 'problemas':          return getProblemas(params);
     // case 'medicoes':           return getMedicoes(params);
@@ -149,7 +161,6 @@ function roteador_Get_(acao, params) {
     // case 'rotina_atividades':  return getRotinaAtividades();
     // case 'rotina_historico':   return getRotinaHistorico(params);
     // case 'rotina_aderencia':   return getRotinaAderencia(params);
-    // case 'config':             return getConfig();
 
     default:
       return { success: false, msg: 'Ação de leitura "' + acao + '" ainda não implementada.' };
@@ -159,41 +170,54 @@ function roteador_Get_(acao, params) {
 function roteador_Post_(tipo, payload) {
   switch (tipo) {
 
-    // ── Login (Backend_Auth.gs) ────────────────────────────────────────────
-    // case 'login': return validarLogin_(payload);
+    // ── Login / Usuário (Etapa 2 — Backend_Auth.gs) ─────────────────────────
+    case 'login':
+      return validarLogin_(payload);
 
-    // ── Obras / Engenheiros (Backend_Obras.gs) ─────────────────────────────
-    // case 'obra_salvar':             return salvarObra_(payload);
-    // case 'obra_excluir':            return excluirObra_(payload);
-    // case 'engenheiro_salvar':       return salvarEngenheiro_(payload);
-    // case 'engenheiro_excluir':      return excluirEngenheiro_(payload);
+    case 'trocar_senha':
+      return trocarSenha_(payload);
 
-    // ── Ata Semanal / Problemas (Backend_Atas.gs / Backend_Problemas.gs) ───
+    // ── Obras (Etapa 2 — Backend_Obras.gs) ──────────────────────────────────
+    case 'obra_salvar':
+      return salvarObra_(payload);
+
+    case 'obra_excluir':
+      return excluirObra_(payload);
+
+    // ── Engenheiros (Etapa 2 — Backend_Engenheiros.gs) ──────────────────────
+    case 'engenheiro_salvar':
+      return salvarEngenheiro_(payload);
+
+    case 'engenheiro_excluir':
+      return excluirEngenheiro_(payload);
+
+    // ── Config (Etapa 1 — Backend_Setup.gs) ─────────────────────────────────
+    case 'config_salvar':
+      return salvarConfig_(payload);
+
+    // ── Ata Semanal / Problemas (próxima etapa) ─────────────────────────────
     // case 'ata_semanal':             return salvarAta_(payload);
     // case 'problema_salvar':         return salvarProblema_(payload);
     // case 'problema_excluir':        return excluirProblema_(payload);
 
-    // ── Medições (Backend_Medicoes.gs) ──────────────────────────────────────
+    // ── Medições (próxima etapa) ─────────────────────────────────────────────
     // case 'medicao_apresentada':     return salvarMedicaoApresentada_(payload);
     // case 'medicao_validada':        return salvarMedicaoValidada_(payload);
     // case 'medicao_faturada':        return salvarMedicaoFaturada_(payload);
     // case 'medicao_excluir':         return excluirMedicao_(payload);
 
-    // ── Cronograma (Backend_Cronograma.gs) ──────────────────────────────────
+    // ── Cronograma (próxima etapa) ───────────────────────────────────────────
     // case 'cronograma_item':         return salvarCronogramaItem_(payload);
 
-    // ── Aditivos (Backend_Aditivos.gs) ──────────────────────────────────────
+    // ── Aditivos (próxima etapa) ──────────────────────────────────────────────
     // case 'aditivo_salvar':          return salvarAditivo_(payload);
     // case 'aditivo_avancar_status':  return avancarStatusAditivo_(payload);
     // case 'aditivo_excluir':         return excluirAditivo_(payload);
 
-    // ── Rotina / Checklist (Backend_Rotina.gs) ──────────────────────────────
+    // ── Rotina / Checklist (próxima etapa) ────────────────────────────────────
     // case 'rotina_check':            return salvarRotinaCheck_(payload);
     // case 'rotina_atividade_upsert': return upsertRotinaAtividade_(payload);
     // case 'rotina_atividade_delete': return deleteRotinaAtividade_(payload);
-
-    // ── Config (Backend_Setup.gs) ────────────────────────────────────────────
-    // case 'config_salvar':           return salvarConfig_(payload);
 
     default:
       return { success: false, msg: 'Ação de escrita "' + tipo + '" ainda não implementada.' };
@@ -220,7 +244,6 @@ function gerarId_(prefixo) {
 /** Grava uma linha no log de auditoria (aba HISTORICO_LOGS). Nunca derruba o sistema. */
 function registrarLog_(tipo, sucesso, payload) {
   try {
-    const aba = getOrCreateSheet_(SHEETS.logs, HEADERS.logs);
     appendObjectRow_(SHEETS.logs, HEADERS.logs, {
       timestamp: new Date(),
       tipo: tipo || '(sem tipo)',
