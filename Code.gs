@@ -151,16 +151,32 @@ function roteador_Get_(acao, params) {
     case 'engenheiros':
       return getEngenheiros();
 
+    // ── Dashboard (Etapa 3 — Backend_Dashboard.gs) ──────────────────────────
+    case 'dashboard':
+      return getDashboard();
+
+    // ── Rotina / Checklist / Calendário / Aderência (Etapa 3 — Backend_Rotina.gs)
+    case 'rotina_atividades':
+      return getRotinaAtividades();
+
+    case 'rotina_historico':
+      return getRotinaHistorico(params);
+
+    case 'rotina_aderencia':
+      return getRotinaAderencia(params);
+
+    case 'rotina_checklist_dia':
+      return getChecklistDoDia(params);
+
+    case 'rotina_calendario':
+      return getCalendarioMes(params);
+
     // ── Módulos a serem ligados nas próximas etapas ────────────────────────
-    // case 'dashboard':          return getDashboard();
     // case 'atas':               return getAtas(params);
     // case 'problemas':          return getProblemas(params);
     // case 'medicoes':           return getMedicoes(params);
     // case 'cronograma':         return getCronograma(params);
     // case 'aditivos':           return getAditivos(params);
-    // case 'rotina_atividades':  return getRotinaAtividades();
-    // case 'rotina_historico':   return getRotinaHistorico(params);
-    // case 'rotina_aderencia':   return getRotinaAderencia(params);
 
     default:
       return { success: false, msg: 'Ação de leitura "' + acao + '" ainda não implementada.' };
@@ -195,6 +211,19 @@ function roteador_Post_(tipo, payload) {
     case 'config_salvar':
       return salvarConfig_(payload);
 
+    // ── Rotina / Checklist (Etapa 3 — Backend_Rotina.gs) ────────────────────
+    case 'rotina_check':
+      return salvarRotinaCheck_(payload);
+
+    case 'rotina_atividade_salvar':
+      return salvarRotinaAtividade_(payload);
+
+    case 'rotina_atividade_excluir':
+      return excluirRotinaAtividade_(payload);
+
+    case 'rotina_recalcular':
+      return recalcularAderencia_(payload.mes);
+
     // ── Ata Semanal / Problemas (próxima etapa) ─────────────────────────────
     // case 'ata_semanal':             return salvarAta_(payload);
     // case 'problema_salvar':         return salvarProblema_(payload);
@@ -213,11 +242,6 @@ function roteador_Post_(tipo, payload) {
     // case 'aditivo_salvar':          return salvarAditivo_(payload);
     // case 'aditivo_avancar_status':  return avancarStatusAditivo_(payload);
     // case 'aditivo_excluir':         return excluirAditivo_(payload);
-
-    // ── Rotina / Checklist (próxima etapa) ────────────────────────────────────
-    // case 'rotina_check':            return salvarRotinaCheck_(payload);
-    // case 'rotina_atividade_upsert': return upsertRotinaAtividade_(payload);
-    // case 'rotina_atividade_delete': return deleteRotinaAtividade_(payload);
 
     default:
       return { success: false, msg: 'Ação de escrita "' + tipo + '" ainda não implementada.' };
