@@ -1,0 +1,447 @@
+/**
+ * ============================================================================
+ *  BACKEND_RELATORIOS.GS — Geração de PDF (Relatório Padrão / Resumo Executivo)
+ *  AG Construtora / ARCOS
+ * ============================================================================
+ *  Gera dois tipos de PDF, sempre com as logos AG CONSTRUTORA + ARCOS lado a
+ *  lado no cabeçalho e um bom contraste (fundo branco, títulos em navy,
+ *  destaques em dourado — pensado pra imprimir bem, diferente do tema escuro
+ *  do site):
+ *
+ *   1. RELATÓRIO PADRÃO      -> gerarRelatorioPadrao_({obra, observacoes})
+ *      KPIs + evolução física + últimas atas + problemas + aditivos de UMA obra.
+ *
+ *   2. RESUMO EXECUTIVO      -> gerarRelatorioResumoExecutivo_({observacoes})
+ *      Visão macro de TODAS as obras + uma seção detalhada pra cada uma.
+ *
+ *  PRÉVIA DE OBSERVAÇÕES:
+ *  Os dois recebem um campo "observacoes" (texto livre digitado no popup do
+ *  frontend ANTES de gerar o PDF) — esse texto é injetado num quadro
+ *  destacado logo após os KPIs, tipo "Resumo da Consultoria".
+ *
+ *  ONDE O PDF FICA SALVO:
+ *  Cada PDF é salvo numa pasta do Google Drive chamada "Relatórios PCO -
+ *  AG-ARCOS" (criada automaticamente na primeira vez) — o mesmo Drive da
+ *  conta que está rodando o Apps Script. A função devolve a URL do arquivo
+ *  pra quem gerou poder abrir/baixar/compartilhar.
+ *  🔒 Por padrão o arquivo NÃO é compartilhado publicamente — só quem já
+ *  tem acesso ao Drive do gestor consegue abrir o link. Isso é proposital
+ *  (são relatórios com dados financeiros do cliente).
+ * ============================================================================
+ */
+
+
+/* ============================================================================
+ * 1. FUNÇÕES PRINCIPAIS (chamadas pelo frontend)
+ * ========================================================================= */
+
+/** Gera o Relatório Padrão (detalhado) de UMA obra específica. */
+function gerarRelatorioPadrao_(payload) {
+  if (!payload || !payload.obra) return { success: false, msg: 'Selecione a obra para gerar o relatório.' };
+
+  const obraObj = sheetToObjects_(SHEETS.obras).find(function (o) { return String(o.nome) === String(payload.obra); });
+  if (!obraObj) return { success: false, msg: 'Obra não encontrada: "' + payload.obra + '".' };
+
+  const aditivos = sheetToObjects_(SHEETS.aditivos);
+  const medicoes = sheetToObjects_(SHEETS.medicoes);
+  const atas = sheetToObjects_(SHEETS.atas);
+  const problemasDaObra = sheetToObjects_(SHEETS.problemas).filter(function (p) { return String(p.obra) === payload.obra; });
+  const aditivosDaObra = aditivos.filter(function (a) { return String(a.obra) === payload.obra; });
+
+  // Reaproveita o mesmo cálculo financeiro do Dashboard (Backend_Dashboard.gs)
+  // — assim o PDF NUNCA mostra um número diferente do que aparece no site.
+  const financeiro = montarFinanceiroDaObra_(obraObj, aditivos, medicoes, atas);
+
+  const atasDaObra = atas
+    .filter(function (a) { return String(a.obra) === payload.obra; })
+    .sort(function (a, b) { return new Date(b.data_referencia || b.timestamp || 0) - new Date(a.data_referencia || a.timestamp || 0); })
+    .slice(0, 6);
+
+  const html = montarHtmlRelatorioPadrao_(financeiro, atasDaObra, problemasDaObra, aditivosDaObra, payload.observacoes || '');
+  return salvarPdfNoDrive_(html, 'Relatorio_Padrao_' + sanitizarNomeArquivo_(payload.obra));
+}
+
+/** Gera o Resumo Executivo: visão macro de todas as obras + detalhe por obra. */
+function gerarRelatorioResumoExecutivo_(payload) {
+  const obras = sheetToObjects_(SHEETS.obras);
+  if (obras.length === 0) return { success: false, msg: 'Não há nenhuma obra cadastrada ainda.' };
+
+  const aditivos = sheetToObjects_(SHEETS.aditivos);
+  const medicoes = sheetToObjects_(SHEETS.medicoes);
+  const atas = sheetToObjects_(SHEETS.atas);
+  const problemas = sheetToObjects_(SHEETS.problemas);
+
+  const obrasComFinanceiro = obras.map(function (o) { return montarFinanceiroDaObra_(o, aditivos, medicoes, atas); });
+
+  const html = montarHtmlResumoExecutivo_(obrasComFinanceiro, problemas, atas, (payload && payload.observacoes) || '');
+  const nomeArquivo = 'Resumo_Executivo_PCO_' + Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  return salvarPdfNoDrive_(html, nomeArquivo);
+}
+
+
+/* ============================================================================
+ * 2. GERAÇÃO DO PDF (converte HTML em PDF e salva no Drive)
+ * ========================================================================= */
+
+/** Converte um HTML em PDF e salva na pasta "Relatórios PCO - AG-ARCOS" do Drive. */
+function salvarPdfNoDrive_(htmlConteudo, nomeBase) {
+  try {
+    const carimboDeData = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyyMMdd_HHmmss');
+    const blobHtml = Utilities.newBlob(htmlConteudo, 'text/html', nomeBase + '.html');
+    const blobPdf = blobHtml.getAs('application/pdf').setName(nomeBase + '_' + carimboDeData + '.pdf');
+
+    const pasta = obterOuCriarPastaRelatorios_();
+    const arquivo = pasta.createFile(blobPdf);
+
+    return { success: true, msg: 'Relatório gerado com sucesso.', url: arquivo.getUrl(), nome: arquivo.getName() };
+  } catch (erro) {
+    return { success: false, msg: 'Erro ao gerar o PDF: ' + erro.message };
+  }
+}
+
+/** Pega (ou cria, na primeira vez) a pasta do Drive onde os PDFs são guardados. */
+function obterOuCriarPastaRelatorios_() {
+  const nomePasta = 'Relatórios PCO - AG-ARCOS';
+  const pastasEncontradas = DriveApp.getFoldersByName(nomePasta);
+  if (pastasEncontradas.hasNext()) return pastasEncontradas.next();
+  return DriveApp.createFolder(nomePasta);
+}
+
+
+/* ============================================================================
+ * 3. MONTAGEM DO HTML — RELATÓRIO PADRÃO (uma obra)
+ * ========================================================================= */
+
+function montarHtmlRelatorioPadrao_(financeiro, atasDaObra, problemasDaObra, aditivosDaObra, observacoes) {
+  const logos = obterLogosParaRelatorio_();
+  const dataGeracao = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "dd/MM/yyyy 'às' HH:mm");
+  const ultimaEvolucao = financeiro.evolucao && financeiro.evolucao.length > 0
+    ? financeiro.evolucao[financeiro.evolucao.length - 1]
+    : null;
+  const avancoFisicoAtual = ultimaEvolucao ? ultimaEvolucao.faturado_pct : 0;
+
+  let html = montarAberturaDocumento_('Relatório Padrão de Obra', logos);
+
+  html += '<div class="cab-obra"><h1>' + escaparHtml_(financeiro.nome) + '</h1>' +
+    '<div class="cab-obra-sub">Engenheiro responsável: ' + escaparHtml_(financeiro.engenheiro || '—') +
+    ' &nbsp;|&nbsp; Status: ' + escaparHtml_(financeiro.status || '—') +
+    ' &nbsp;|&nbsp; Gerado em ' + dataGeracao + '</div></div>';
+
+  if (observacoes && observacoes.trim() !== '') {
+    html += montarQuadroObservacoes_(observacoes);
+  }
+
+  // ── KPIs financeiros ──────────────────────────────────────────────────────
+  html += '<div class="kpi-grid">' +
+    montarKpiCard_('Valor Total do Contrato', formatarMoeda_(financeiro.valor_total_contrato), '') +
+    montarKpiCard_('Faturado', formatarMoeda_(financeiro.faturado), 'ok') +
+    montarKpiCard_('A Faturar', formatarMoeda_(financeiro.a_faturar), 'alerta') +
+    montarKpiCard_('Saldo Previsto', formatarMoeda_(financeiro.saldo_previsto), financeiro.saldo_previsto >= 0 ? 'ok' : 'risco') +
+    '</div>';
+
+  html += '<div class="kpi-grid" style="margin-top:8px">' +
+    montarKpiCard_('Avanço Físico (Faturado)', avancoFisicoAtual + '%', '') +
+    montarKpiCard_('Total Aditivos Liberados', formatarMoeda_(financeiro.total_aditivos_liberados), '') +
+    '</div>';
+
+  // ── Evolução física (barras Previsto / Apresentado / Faturado) ──────────
+  html += '<h2 class="secao-titulo">Evolução Física — Previsto x Apresentado x Faturado</h2>';
+  html += montarTabelaEvolucao_(financeiro.evolucao);
+
+  // ── Últimas atas ──────────────────────────────────────────────────────────
+  html += '<h2 class="secao-titulo">Últimas Atas de Reunião</h2>';
+  html += montarTabelaAtas_(atasDaObra);
+
+  // ── Problemas em aberto ───────────────────────────────────────────────────
+  html += '<h2 class="secao-titulo">Problemas de Obra</h2>';
+  html += montarTabelaProblemas_(problemasDaObra);
+
+  // ── Aditivos ──────────────────────────────────────────────────────────────
+  html += '<h2 class="secao-titulo">Aditivos Contratuais</h2>';
+  html += montarTabelaAditivos_(aditivosDaObra);
+
+  html += montarRodapeDocumento_();
+  html += '</body></html>';
+  return html;
+}
+
+
+/* ============================================================================
+ * 4. MONTAGEM DO HTML — RESUMO EXECUTIVO (todas as obras)
+ * ========================================================================= */
+
+function montarHtmlResumoExecutivo_(obrasComFinanceiro, problemas, atas, observacoes) {
+  const logos = obterLogosParaRelatorio_();
+  const dataGeracao = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "dd/MM/yyyy 'às' HH:mm");
+
+  const totalContrato = somarCampo_(obrasComFinanceiro, 'valor_total_contrato');
+  const totalFaturado = somarCampo_(obrasComFinanceiro, 'faturado');
+  const totalAFaturar = somarCampo_(obrasComFinanceiro, 'a_faturar');
+  const totalSaldo = somarCampo_(obrasComFinanceiro, 'saldo_previsto');
+  const obrasAtivas = obrasComFinanceiro.filter(function (o) { return String(o.status).toLowerCase() === 'ativa'; });
+
+  let html = montarAberturaDocumento_('Resumo Executivo — Visão Geral do Portfólio', logos);
+
+  html += '<div class="cab-obra"><h1>Todas as Obras</h1>' +
+    '<div class="cab-obra-sub">' + obrasComFinanceiro.length + ' obra(s) cadastrada(s), ' + obrasAtivas.length +
+    ' ativa(s) &nbsp;|&nbsp; Gerado em ' + dataGeracao + '</div></div>';
+
+  if (observacoes && observacoes.trim() !== '') {
+    html += montarQuadroObservacoes_(observacoes);
+  }
+
+  // ── KPIs macro ────────────────────────────────────────────────────────────
+  html += '<div class="kpi-grid">' +
+    montarKpiCard_('Valor Total (todas as obras)', formatarMoeda_(totalContrato), '') +
+    montarKpiCard_('Faturado', formatarMoeda_(totalFaturado), 'ok') +
+    montarKpiCard_('A Faturar', formatarMoeda_(totalAFaturar), 'alerta') +
+    montarKpiCard_('Saldo Previsto', formatarMoeda_(totalSaldo), totalSaldo >= 0 ? 'ok' : 'risco') +
+    '</div>';
+
+  // ── Tabela-resumo de todas as obras ───────────────────────────────────────
+  html += '<h2 class="secao-titulo">Visão Geral por Obra</h2>';
+  html += '<table class="tabela-relatorio"><thead><tr>' +
+    '<th>Obra</th><th>Status</th><th>Valor Total</th><th>Faturado</th><th>A Faturar</th><th>Saldo Previsto</th>' +
+    '</tr></thead><tbody>';
+  obrasComFinanceiro.forEach(function (o) {
+    html += '<tr><td>' + escaparHtml_(o.nome) + '</td><td>' + escaparHtml_(o.status || '—') + '</td>' +
+      '<td>' + formatarMoeda_(o.valor_total_contrato) + '</td>' +
+      '<td>' + formatarMoeda_(o.faturado) + '</td>' +
+      '<td>' + formatarMoeda_(o.a_faturar) + '</td>' +
+      '<td class="' + (o.saldo_previsto >= 0 ? 'texto-ok' : 'texto-risco') + '">' + formatarMoeda_(o.saldo_previsto) + '</td></tr>';
+  });
+  html += '</tbody></table>';
+
+  // ── Seção detalhada por obra (uma página nova pra cada) ──────────────────
+  obrasComFinanceiro.forEach(function (obra) {
+    const problemasDaObra = problemas.filter(function (p) { return String(p.obra) === String(obra.nome); });
+    const atasDaObra = atas.filter(function (a) { return String(a.obra) === String(obra.nome); })
+      .sort(function (a, b) { return new Date(b.data_referencia || b.timestamp || 0) - new Date(a.data_referencia || a.timestamp || 0); })
+      .slice(0, 3);
+
+    html += '<div class="quebra-pagina"></div>';
+    html += '<div class="cab-obra cab-obra-secundaria"><h1>' + escaparHtml_(obra.nome) + '</h1>' +
+      '<div class="cab-obra-sub">Engenheiro: ' + escaparHtml_(obra.engenheiro || '—') + '</div></div>';
+
+    html += '<div class="kpi-grid">' +
+      montarKpiCard_('Valor Total', formatarMoeda_(obra.valor_total_contrato), '') +
+      montarKpiCard_('Faturado', formatarMoeda_(obra.faturado), 'ok') +
+      montarKpiCard_('A Faturar', formatarMoeda_(obra.a_faturar), 'alerta') +
+      montarKpiCard_('Saldo Previsto', formatarMoeda_(obra.saldo_previsto), obra.saldo_previsto >= 0 ? 'ok' : 'risco') +
+      '</div>';
+
+    html += '<h2 class="secao-titulo-sm">Evolução Física</h2>' + montarTabelaEvolucao_(obra.evolucao);
+    html += '<h2 class="secao-titulo-sm">Últimas Atas</h2>' + montarTabelaAtas_(atasDaObra);
+    html += '<h2 class="secao-titulo-sm">Problemas de Obra</h2>' + montarTabelaProblemas_(problemasDaObra);
+  });
+
+  html += montarRodapeDocumento_();
+  html += '</body></html>';
+  return html;
+}
+
+
+/* ============================================================================
+ * 5. BLOCOS HTML REUTILIZÁVEIS (cabeçalho, KPI card, tabelas, rodapé)
+ * ========================================================================= */
+
+/** Abre o documento HTML com o <head> (CSS inline — obrigatório pra virar PDF
+ *  corretamente) e o cabeçalho com as duas logos lado a lado. */
+function montarAberturaDocumento_(tituloDocumento, logos) {
+  let html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><style>' + CSS_RELATORIO_ + '</style></head><body>';
+
+  html += '<div class="cabecalho-logos">';
+  html += '<div class="logos-wrap">';
+  if (logos.logo1) html += '<img src="' + logos.logo1 + '" class="logo-img">';
+  if (logos.logo1 && logos.logo2) html += '<div class="logo-divisor"></div>';
+  if (logos.logo2) html += '<img src="' + logos.logo2 + '" class="logo-img">';
+  if (!logos.logo1 && !logos.logo2) {
+    html += '<div class="logo-texto">' + escaparHtml_(logos.nome1) + ' &nbsp;|&nbsp; ' + escaparHtml_(logos.nome2) + '</div>';
+  }
+  html += '</div>';
+  html += '<div class="titulo-documento">' + escaparHtml_(tituloDocumento) + '</div>';
+  html += '</div>';
+
+  return html;
+}
+
+/** Busca as logos configuradas na aba CONFIG e converte pra base64 (data URI),
+ *  pra garantir que a imagem apareça no PDF mesmo sem acesso à internet no
+ *  momento da conversão. Se a URL falhar por qualquer motivo, o relatório
+ *  simplesmente mostra o nome da empresa em texto — nunca quebra por causa
+ *  de uma logo. */
+function obterLogosParaRelatorio_() {
+  const configuracao = getConfig().config || {};
+  return {
+    logo1: configuracao.logo_empresa_1_url ? converterImagemParaDataUri_(configuracao.logo_empresa_1_url) : '',
+    logo2: configuracao.logo_empresa_2_url ? converterImagemParaDataUri_(configuracao.logo_empresa_2_url) : '',
+    nome1: configuracao.nome_empresa_1 || 'AG CONSTRUTORA',
+    nome2: configuracao.nome_empresa_2 || 'ARCOS'
+  };
+}
+
+function converterImagemParaDataUri_(url) {
+  try {
+    const resposta = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
+    if (resposta.getResponseCode() !== 200) return '';
+    const blob = resposta.getBlob();
+    const tipoMime = blob.getContentType() || 'image/png';
+    const base64 = Utilities.base64Encode(blob.getBytes());
+    return 'data:' + tipoMime + ';base64,' + base64;
+  } catch (erro) {
+    return '';
+  }
+}
+
+/** Quadro destacado com o texto de observações digitado na "prévia" do frontend. */
+function montarQuadroObservacoes_(texto) {
+  return '<div class="quadro-observacoes"><div class="quadro-observacoes-titulo">📝 Resumo da Consultoria</div>' +
+    '<div class="quadro-observacoes-texto">' + escaparHtml_(texto).replace(/\n/g, '<br>') + '</div></div>';
+}
+
+/** Um card de KPI. Classe "ok" = verde, "alerta" = âmbar, "risco" = vermelho. */
+function montarKpiCard_(label, valor, classeExtra) {
+  return '<div class="kpi-card ' + (classeExtra || '') + '">' +
+    '<div class="kpi-label">' + escaparHtml_(label) + '</div>' +
+    '<div class="kpi-valor">' + valor + '</div></div>';
+}
+
+/** Tabela de evolução física com barrinhas de % (CSS puro — funciona em PDF estático). */
+function montarTabelaEvolucao_(evolucao) {
+  if (!evolucao || evolucao.length === 0) {
+    return '<div class="vazio-aviso">Ainda não há dados suficientes de atas/medições para montar a evolução física deste período.</div>';
+  }
+  let html = '<table class="tabela-relatorio"><thead><tr><th>Mês</th><th>Previsto</th><th>Apresentado</th><th>Faturado</th></tr></thead><tbody>';
+  evolucao.forEach(function (e) {
+    html += '<tr><td>' + escaparHtml_(e.mes) + '</td>' +
+      '<td>' + montarBarraPct_(e.previsto, '#4FC3DC') + '</td>' +
+      '<td>' + montarBarraPct_(e.apresentado, '#C8A96E') + '</td>' +
+      '<td>' + montarBarraPct_(e.faturado_pct || 0, '#2EC98A') + '</td></tr>';
+  });
+  html += '</tbody></table>';
+  return html;
+}
+
+/** Uma barrinha horizontal de progresso (% + cor), pra simular gráfico em PDF estático. */
+function montarBarraPct_(percentual, cor) {
+  const pct = Math.max(0, Math.min(100, parseFloat(percentual || 0)));
+  return '<div class="barra-pct-wrap"><div class="barra-pct-fill" style="width:' + pct + '%;background:' + cor + '"></div></div>' +
+    '<span class="barra-pct-num">' + pct + '%</span>';
+}
+
+function montarTabelaAtas_(listaAtas) {
+  if (!listaAtas || listaAtas.length === 0) {
+    return '<div class="vazio-aviso">Nenhuma ata registrada neste período.</div>';
+  }
+  let html = '<table class="tabela-relatorio"><thead><tr><th>Data</th><th>Nº Ata</th><th>Previsto</th><th>Realizado</th><th>Desvio</th></tr></thead><tbody>';
+  listaAtas.forEach(function (a) {
+    const desvio = parseFloat(a.desvio || 0);
+    html += '<tr><td>' + escaparHtml_(a.data_referencia || '—') + '</td><td>' + escaparHtml_(a.numero_ata || '—') + '</td>' +
+      '<td>' + parseFloat(a.avanco_previsto || 0) + '%</td><td>' + parseFloat(a.avanco_realizado || 0) + '%</td>' +
+      '<td class="' + (desvio >= 0 ? 'texto-ok' : 'texto-risco') + '">' + (desvio >= 0 ? '+' : '') + desvio + '%</td></tr>';
+  });
+  html += '</tbody></table>';
+  return html;
+}
+
+function montarTabelaProblemas_(listaProblemas) {
+  if (!listaProblemas || listaProblemas.length === 0) {
+    return '<div class="vazio-aviso">Nenhum problema registrado — ótimo sinal. ✅</div>';
+  }
+  let html = '<table class="tabela-relatorio"><thead><tr><th>Categoria</th><th>Descrição</th><th>Status</th><th>Impacto (dias)</th></tr></thead><tbody>';
+  listaProblemas.forEach(function (p) {
+    html += '<tr><td>' + escaparHtml_(p.categoria || '—') + '</td>' +
+      '<td class="celula-descricao">' + escaparHtml_(String(p.descricao || '').substring(0, 160)) + '</td>' +
+      '<td>' + escaparHtml_(p.status || '—') + '</td><td>' + (p.impacto_dias || 0) + '</td></tr>';
+  });
+  html += '</tbody></table>';
+  return html;
+}
+
+function montarTabelaAditivos_(listaAditivos) {
+  if (!listaAditivos || listaAditivos.length === 0) {
+    return '<div class="vazio-aviso">Nenhum aditivo registrado para esta obra.</div>';
+  }
+  let html = '<table class="tabela-relatorio"><thead><tr><th>Número</th><th>Descrição</th><th>Valor Atual</th><th>Status</th></tr></thead><tbody>';
+  listaAditivos.forEach(function (a) {
+    html += '<tr><td>' + escaparHtml_(a.numero || '—') + '</td>' +
+      '<td class="celula-descricao">' + escaparHtml_(String(a.descricao || '').substring(0, 140)) + '</td>' +
+      '<td>' + formatarMoeda_(a.valor_atual || a.valor_original) + '</td><td>' + escaparHtml_(a.status_atual || '—') + '</td></tr>';
+  });
+  html += '</tbody></table>';
+  return html;
+}
+
+function montarRodapeDocumento_() {
+  const dataHora = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "dd/MM/yyyy 'às' HH:mm");
+  return '<div class="rodape">Documento gerado automaticamente pelo Sistema PCO — AG Construtora / ARCOS em ' + dataHora + '.</div>';
+}
+
+
+/* ============================================================================
+ * 6. HELPERS DE FORMATAÇÃO E SEGURANÇA
+ * ========================================================================= */
+
+/** Formata um número como moeda brasileira. Ex: 15000 -> "R$ 15.000,00" */
+function formatarMoeda_(valor) {
+  const numero = parseFloat(valor || 0);
+  return 'R$ ' + numero.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+/** Escapa caracteres especiais de HTML — evita que texto digitado pelo usuário
+ *  (ex: descrição de um problema com "<" ou "&") quebre a estrutura do PDF. */
+function escaparHtml_(texto) {
+  return String(texto === undefined || texto === null ? '' : texto)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+/** Remove caracteres especiais de um texto pra usar como nome de arquivo seguro. */
+function sanitizarNomeArquivo_(texto) {
+  return String(texto).replace(/[^a-zA-Z0-9]+/g, '_').substring(0, 50);
+}
+
+
+/* ============================================================================
+ * 7. CSS DO RELATÓRIO (fundo branco, alto contraste, pensado pra impressão —
+ *    de propósito diferente do tema escuro do site, que não imprime bem)
+ * ========================================================================= */
+const CSS_RELATORIO_ =
+  'body{font-family:Arial,Helvetica,sans-serif;color:#1a2436;background:#fff;margin:0;padding:32px 40px;font-size:12px}' +
+  '.cabecalho-logos{display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid #C8A96E;padding-bottom:14px;margin-bottom:18px}' +
+  '.logos-wrap{display:flex;align-items:center;gap:14px}' +
+  '.logo-img{height:38px;object-fit:contain}' +
+  '.logo-divisor{width:1px;height:26px;background:#ccc}' +
+  '.logo-texto{font-weight:700;color:#001132;font-size:13px}' +
+  '.titulo-documento{font-size:13px;font-weight:700;color:#001132;text-transform:uppercase;letter-spacing:.04em}' +
+  '.cab-obra{margin-bottom:16px}' +
+  '.cab-obra h1{font-size:20px;color:#001132;margin:0 0 4px}' +
+  '.cab-obra-sub{font-size:11px;color:#555}' +
+  '.cab-obra-secundaria{border-top:2px solid #001132;padding-top:14px}' +
+  '.quadro-observacoes{background:#FBF6EC;border:1px solid #C8A96E;border-radius:6px;padding:12px 16px;margin-bottom:18px}' +
+  '.quadro-observacoes-titulo{font-weight:700;color:#8a6d1f;font-size:11px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px}' +
+  '.quadro-observacoes-texto{font-size:12px;line-height:1.55;color:#333}' +
+  '.kpi-grid{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px}' +
+  '.kpi-card{flex:1;min-width:130px;border:1px solid #ddd;border-radius:6px;padding:10px 12px;background:#fafafa}' +
+  '.kpi-card.ok{border-color:#2EC98A;background:#F0FAF6}' +
+  '.kpi-card.alerta{border-color:#E8A74A;background:#FDF6EC}' +
+  '.kpi-card.risco{border-color:#E8504A;background:#FDF0EF}' +
+  '.kpi-label{font-size:9.5px;text-transform:uppercase;letter-spacing:.04em;color:#777;margin-bottom:4px}' +
+  '.kpi-valor{font-size:15px;font-weight:700;color:#001132}' +
+  '.secao-titulo{font-size:13px;color:#001132;border-bottom:2px solid #001132;padding-bottom:4px;margin:20px 0 8px;text-transform:uppercase;letter-spacing:.03em}' +
+  '.secao-titulo-sm{font-size:11.5px;color:#001132;border-bottom:1px solid #ccc;padding-bottom:3px;margin:14px 0 6px;text-transform:uppercase;letter-spacing:.03em}' +
+  '.tabela-relatorio{width:100%;border-collapse:collapse;margin-bottom:6px}' +
+  '.tabela-relatorio th{background:#001132;color:#fff;font-size:9.5px;text-transform:uppercase;letter-spacing:.03em;padding:6px 8px;text-align:left}' +
+  '.tabela-relatorio td{font-size:11px;padding:6px 8px;border-bottom:1px solid #eee}' +
+  '.tabela-relatorio tr:nth-child(even) td{background:#fafafa}' +
+  '.celula-descricao{max-width:260px}' +
+  '.texto-ok{color:#1f8f5c;font-weight:700}' +
+  '.texto-risco{color:#c23a35;font-weight:700}' +
+  '.barra-pct-wrap{display:inline-block;width:60px;height:8px;background:#eee;border-radius:4px;overflow:hidden;vertical-align:middle;margin-right:6px}' +
+  '.barra-pct-fill{height:100%}' +
+  '.barra-pct-num{font-size:10.5px;color:#444;vertical-align:middle}' +
+  '.vazio-aviso{font-size:11px;color:#888;font-style:italic;padding:8px 0}' +
+  '.quebra-pagina{page-break-before:always}' +
+  '.rodape{margin-top:26px;padding-top:10px;border-top:1px solid #ddd;font-size:9.5px;color:#999;text-align:center}';
