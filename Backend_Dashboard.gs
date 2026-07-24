@@ -39,7 +39,7 @@
 
 function getDashboard() {
   const obras = sheetToObjects_(SHEETS.obras);
-  const atas = sheetToObjects_(SHEETS.atas);           // [] até a Etapa 4 (Backend_Atas.gs)
+  const atas = sheetToObjects_(SHEETS.atas);           // agora alimentado de verdade pelo Backend_Atas.gs (Etapa 4)
   const aditivos = sheetToObjects_(SHEETS.aditivos);   // [] até a Etapa 5 (Backend_Aditivos.gs)
   const medicoes = sheetToObjects_(SHEETS.medicoes);   // [] até a Etapa 6 (Backend_Medicoes.gs)
   const engenheiros = sheetToObjects_(SHEETS.engenheiros);
