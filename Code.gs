@@ -172,11 +172,22 @@ function roteador_Get_(acao, params) {
       return getCalendarioMes(params);
 
     // ── Módulos a serem ligados nas próximas etapas ────────────────────────
-    // case 'atas':               return getAtas(params);
-    // case 'problemas':          return getProblemas(params);
     // case 'medicoes':           return getMedicoes(params);
     // case 'cronograma':         return getCronograma(params);
     // case 'aditivos':           return getAditivos(params);
+
+    // ── Ata Semanal / Problemas de Obra (Etapa 4 — Backend_Atas.gs / Backend_Problemas.gs)
+    case 'atas':
+      return getAtas(params);
+
+    case 'problemas':
+      return getProblemas(params);
+
+    case 'categorias_problema':
+      return getCategoriasProblema();
+
+    case 'problemas_top_categorias':
+      return getTopCategoriasProblema();
 
     default:
       return { success: false, msg: 'Ação de leitura "' + acao + '" ainda não implementada.' };
@@ -224,10 +235,18 @@ function roteador_Post_(tipo, payload) {
     case 'rotina_recalcular':
       return recalcularAderencia_(payload.mes);
 
-    // ── Ata Semanal / Problemas (próxima etapa) ─────────────────────────────
-    // case 'ata_semanal':             return salvarAta_(payload);
-    // case 'problema_salvar':         return salvarProblema_(payload);
-    // case 'problema_excluir':        return excluirProblema_(payload);
+    // ── Ata Semanal / Problemas de Obra (Etapa 4 — Backend_Atas.gs / Backend_Problemas.gs)
+    case 'ata_salvar':
+      return salvarAta_(payload);
+
+    case 'ata_excluir':
+      return excluirAta_(payload);
+
+    case 'problema_salvar':
+      return salvarProblema_(payload);
+
+    case 'problema_excluir':
+      return excluirProblema_(payload);
 
     // ── Medições (próxima etapa) ─────────────────────────────────────────────
     // case 'medicao_apresentada':     return salvarMedicaoApresentada_(payload);
