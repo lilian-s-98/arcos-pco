@@ -288,6 +288,13 @@ function roteador_Post_(tipo, payload) {
     case 'aditivo_excluir':
       return excluirAditivo_(payload);
 
+    // ── Relatórios em PDF (Etapa 7 — Backend_Relatorios.gs) ─────────────────
+    case 'relatorio_padrao_gerar':
+      return gerarRelatorioPadrao_(payload);
+
+    case 'relatorio_executivo_gerar':
+      return gerarRelatorioResumoExecutivo_(payload);
+
     default:
       return { success: false, msg: 'Ação de escrita "' + tipo + '" ainda não implementada.' };
   }
