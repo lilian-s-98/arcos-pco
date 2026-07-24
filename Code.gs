@@ -171,11 +171,6 @@ function roteador_Get_(acao, params) {
     case 'rotina_calendario':
       return getCalendarioMes(params);
 
-    // ── Módulos a serem ligados nas próximas etapas ────────────────────────
-    // case 'medicoes':           return getMedicoes(params);
-    // case 'cronograma':         return getCronograma(params);
-    // case 'aditivos':           return getAditivos(params);
-
     // ── Ata Semanal / Problemas de Obra (Etapa 4 — Backend_Atas.gs / Backend_Problemas.gs)
     case 'atas':
       return getAtas(params);
@@ -188,6 +183,21 @@ function roteador_Get_(acao, params) {
 
     case 'problemas_top_categorias':
       return getTopCategoriasProblema();
+
+    // ── Medições (Etapa 5 — Backend_Medicoes.gs) ────────────────────────────
+    case 'medicoes':
+      return getMedicoes(params);
+
+    // ── Cronograma (Etapa 5 — Backend_Cronograma.gs) ────────────────────────
+    case 'cronograma':
+      return getCronograma(params);
+
+    // ── Aditivos (Etapa 6 — Backend_Aditivos.gs) ────────────────────────────
+    case 'aditivos':
+      return getAditivos(params);
+
+    case 'aditivos_fluxo':
+      return getFluxoAditivos();
 
     default:
       return { success: false, msg: 'Ação de leitura "' + acao + '" ainda não implementada.' };
@@ -248,19 +258,35 @@ function roteador_Post_(tipo, payload) {
     case 'problema_excluir':
       return excluirProblema_(payload);
 
-    // ── Medições (próxima etapa) ─────────────────────────────────────────────
-    // case 'medicao_apresentada':     return salvarMedicaoApresentada_(payload);
-    // case 'medicao_validada':        return salvarMedicaoValidada_(payload);
-    // case 'medicao_faturada':        return salvarMedicaoFaturada_(payload);
-    // case 'medicao_excluir':         return excluirMedicao_(payload);
+    // ── Medições (Etapa 5 — Backend_Medicoes.gs) ────────────────────────────
+    case 'medicao_apresentada':
+      return salvarMedicaoApresentada_(payload);
 
-    // ── Cronograma (próxima etapa) ───────────────────────────────────────────
-    // case 'cronograma_item':         return salvarCronogramaItem_(payload);
+    case 'medicao_validada':
+      return salvarMedicaoValidada_(payload);
 
-    // ── Aditivos (próxima etapa) ──────────────────────────────────────────────
-    // case 'aditivo_salvar':          return salvarAditivo_(payload);
-    // case 'aditivo_avancar_status':  return avancarStatusAditivo_(payload);
-    // case 'aditivo_excluir':         return excluirAditivo_(payload);
+    case 'medicao_faturada':
+      return salvarMedicaoFaturada_(payload);
+
+    case 'medicao_excluir':
+      return excluirMedicao_(payload);
+
+    // ── Cronograma (Etapa 5 — Backend_Cronograma.gs) ────────────────────────
+    case 'cronograma_item_salvar':
+      return salvarCronogramaItem_(payload);
+
+    case 'cronograma_item_excluir':
+      return excluirCronogramaItem_(payload);
+
+    // ── Aditivos (Etapa 6 — Backend_Aditivos.gs) ────────────────────────────
+    case 'aditivo_salvar':
+      return salvarAditivo_(payload);
+
+    case 'aditivo_avancar_status':
+      return avancarStatusAditivo_(payload);
+
+    case 'aditivo_excluir':
+      return excluirAditivo_(payload);
 
     default:
       return { success: false, msg: 'Ação de escrita "' + tipo + '" ainda não implementada.' };
