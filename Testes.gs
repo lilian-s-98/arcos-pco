@@ -1,17 +1,12 @@
 function teste() {
-  const r = salvarAta_({
-    obra: 'Obra Teste',
-    data_referencia: '2026-07-20',
-    avanco_previsto: 30,
-    avanco_realizado: 22,
-    motivo_desvio: 'Chuva / Intempéries',
-    ocorrencias: 'Chuva forte impediu concretagem por 3 dias.'
-  });
-  Logger.log(r); // deve vir success:true
+  const med = salvarMedicaoApresentada_({ obra:'Obra Teste', numero_bm:'BM-001', competencia:'2026-07', valor_apresentado: 50000, data_apresentado:'2026-07-10' });
+  Logger.log(med); // guarda o "id" que aparece aqui
 
-  Logger.log(getAtas({})); // deve trazer a ata acima
+  Logger.log(salvarMedicaoValidada_({ id: med.id, valor_validado: 48000, data_validado:'2026-07-15' }));
+  Logger.log(getMedicoes({ obra:'Obra Teste' })); // status deve estar "Validada"
 
-  Logger.log(getProblemas({})); // ⭐ deve trazer 1 problema AUTOMÁTICO (origem:"Ata")
+  Logger.log(salvarMedicaoFaturada_({ id: med.id, valor_faturado: 48000, data_faturado:'2026-07-20' }));
+  Logger.log(getMedicoes({ obra:'Obra Teste' })); // status agora "Faturada"
 
-  Logger.log(getCategoriasProblema()); // lista de categorias fixas
+  Logger.log(getDashboard()); // total_faturado da Obra Teste deve ser 48000 agora
 }
